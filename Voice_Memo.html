@@ -1,66 +1,3 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <title>Voice Memo Pro - Sync</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: #e2e2e2;
-            display: flex; justify-content: center; align-items: center;
-            height: 100vh; margin: 0;
-        }
-        .container { 
-            width: 340px; background: rgba(255, 255, 255, 0.75);
-            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-            border-radius: 18px; border: 1px solid rgba(255, 255, 255, 0.4);
-            box-shadow: 0 10px 40px rgba(0,0,0,0.15); padding: 25px; text-align: center;
-        }
-        .header-dots { display: flex; gap: 7px; margin-bottom: 20px; }
-        .dot { width: 12px; height: 12px; border-radius: 50%; }
-        .red { background: #ff5f56; } .yellow { background: #ffbd2e; } .green { background: #27c93f; }
-
-        #status { font-size: 0.85rem; font-weight: 600; color: #888; margin-bottom: 15px; letter-spacing: 0.5px; }
-        #status.active { color: #ff3b30; }
-
-        /* メインボタン：Apple公式に近いブルー */
-        .main-btn { 
-            font-size: 1rem; font-weight: 600; padding: 15px;
-            cursor: pointer; border: none; border-radius: 12px; width: 100%;
-            background: #007aff; color: white; transition: all 0.2s;
-            box-shadow: 0 4px 12px rgba(0,122,255,0.3);
-        }
-        .main-btn.recording { background: #ff3b30; box-shadow: 0 4px 12px rgba(255,59,48,0.3); }
-        .main-btn:active { transform: scale(0.97); }
-
-        .pip-btn { 
-            background: none; border: none; color: #007aff; font-size: 0.85rem; 
-            margin-bottom: 15px; cursor: pointer; font-weight: 500;
-        }
-
-        textarea { 
-            width: 93%; height: 100px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.05);
-            margin-top: 20px; padding: 12px; font-size: 0.9rem; 
-            background: rgba(255, 255, 255, 0.4); resize: none; color: #333;
-        }
-    </style>
-</head>
-<body>
-
-<div class="container">
-    <div class="header-dots">
-        <div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div>
-    </div>
-    
-    <button id="pipBtn" class="pip-btn">🔲 小窓モードで開く</button>
-    <div id="status">READY</div>
-
-    <button id="startStopBtn" class="main-btn">🎤 記録開始 (録音＆文字起こし)</button>
-
-    <textarea id="resultArea" placeholder="ここに文字起こしが表示されます..."></textarea>
-</div>
-
 <script>
     let stream = null;
     let mediaRecorder = null;
@@ -71,18 +8,32 @@
     const btn = document.getElementById('startStopBtn');
     const resultArea = document.getElementById('resultArea');
 
-    // 文字起こし設定
-    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    // 文字起こし設定の改善
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+        resultArea.value = "❌ お使いのブラウザは音声認識に対応していません。";
+    }
+    const recognition = new SpeechRecognition();
     recognition.lang = 'ja-JP';
     recognition.continuous = true;
     recognition.interimResults = true;
 
-    // 停止・保存処理
+    // --- エラー診断機能を追加 ---
+    recognition.onerror = (event) => {
+        console.error("Speech Recognition Error:", event.error);
+        if (event.error === 'not-allowed') {
+            resultArea.value = "❌ マイクの使用が許可されていません。ブラウザの設定を確認してください。";
+        } else if (event.error === 'network') {
+            resultArea.value = "❌ ネットワークエラーです。音声認識にはインターネット接続が必要です。";
+        } else {
+            resultArea.value = "⚠️ エラー発生: " + event.error;
+        }
+    };
+
     async function stopAndSave() {
-        recognition.stop();
+        try { recognition.stop(); } catch(e) {}
         if (mediaRecorder) mediaRecorder.stop();
         
-        // マイクを完全にオフ
         if (stream) {
             stream.getTracks().forEach(t => t.stop());
             stream = null;
@@ -102,27 +53,21 @@
         }
 
         try {
-            // 1. マイク取得
             stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            
-            // 2. 録音準備
             mediaRecorder = new MediaRecorder(stream);
             audioChunks = [];
             mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
             mediaRecorder.onstop = () => {
                 const now = new Date().getTime();
-                // MP3保存
                 const audioBlob = new Blob(audioChunks, { type: 'audio/mp3' });
                 saveFile(audioBlob, `Memo_${now}.mp3`);
-                // テキスト保存
-                if (resultArea.value) {
+                if (resultArea.value && !resultArea.value.startsWith('❌')) {
                     const textBlob = new Blob([resultArea.value], {type:'text/plain'});
                     saveFile(textBlob, `Text_${now}.txt`);
                 }
             };
 
-            // 3. 開始
-            resultArea.value = "";
+            resultArea.value = "認識中...";
             mediaRecorder.start();
             recognition.start();
 
@@ -133,7 +78,7 @@
             btn.classList.add('recording');
 
         } catch (e) {
-            alert("マイクの許可が必要です。");
+            alert("マイクの許可が必要です。または、このページを「http」で公開する必要があります。");
         }
     };
 
@@ -150,7 +95,6 @@
         a.click();
     }
 
-    // 小窓モード
     document.getElementById('pipBtn').onclick = async () => {
         const pipWindow = await window.documentPictureInPicture.requestWindow({ width: 340, height: 450 });
         const style = document.createElement('style');
@@ -160,5 +104,3 @@
         pipWindow.onpagehide = () => { stopAndSave(); location.reload(); };
     };
 </script>
-</body>
-</html>
