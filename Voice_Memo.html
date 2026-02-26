@@ -2,8 +2,9 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>Voice Recorder - Pro</title>
+    <title>Voice Recorder - MP3 Pro</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
     <style>
         body { 
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -43,7 +44,7 @@
         <div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div>
     </div>
     
-    <div id="status">VOICE RECORDER</div>
+    <div id="status">MP3 RECORDER</div>
     <div id="timer" class="time-display">00:00</div>
 
     <button id="recordBtn" class="main-btn">🎤 録音開始</button>
@@ -51,18 +52,21 @@
 
 <script>
     let stream = null;
-    let mediaRecorder = null;
-    let audioChunks = [];
+    let audioContext = null;
+    let processor = null;
+    let source = null;
+    let mp3Encoder = null;
+    let mp3Data = [];
     let startTime = null;
     let timerInterval = null;
+    let isRecording = false;
 
     const statusEl = document.getElementById('status');
     const timerEl = document.getElementById('timer');
     const btn = document.getElementById('recordBtn');
 
     function updateTimer() {
-        const now = new Date();
-        const diff = new Date(now - startTime);
+        const diff = new Date(new Date() - startTime);
         const m = String(diff.getMinutes()).padStart(2, '0');
         const s = String(diff.getSeconds()).padStart(2, '0');
         timerEl.innerText = `${m}:${s}`;
@@ -70,37 +74,61 @@
 
     async function startRecording() {
         try {
+            // マイク取得（許可はここでの1回だけになります）
             stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaRecorder = new MediaRecorder(stream);
-            audioChunks = [];
+            
+            // MP3エンコーダーの準備 (44.1kHz, 128kbps)
+            mp3Encoder = new lamejs.Mp3Encoder(1, 44100, 128);
+            mp3Data = [];
 
-            mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
-            mediaRecorder.onstop = () => {
-                const blob = new Blob(audioChunks, { type: 'audio/webm' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `Recording_${new Date().getTime()}.webm`;
-                a.click();
+            audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
+            source = audioContext.createMediaStreamSource(stream);
+            processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+            processor.onaudioprocess = (e) => {
+                const left = e.inputBuffer.getChannelData(0);
+                // Float32をInt16に変換
+                const int16Array = new Int16Array(left.length);
+                for (let i = 0; i < left.length; i++) {
+                    int16Array[i] = left[i] < 0 ? left[i] * 0x8000 : left[i] * 0x7FFF;
+                }
+                const mp3buf = mp3Encoder.encodeBuffer(int16Array);
+                if (mp3buf.length > 0) mp3Data.push(mp3buf);
             };
 
-            mediaRecorder.start();
+            source.connect(processor);
+            processor.connect(audioContext.destination);
+
             startTime = new Date();
             timerInterval = setInterval(updateTimer, 1000);
+            isRecording = true;
 
-            btn.innerText = "■ 停止して保存";
+            btn.innerText = "■ 停止してMP3保存";
             btn.classList.add('recording');
-            statusEl.innerText = "● RECORDING";
+            statusEl.innerText = "● RECORDING (MP3)";
             statusEl.classList.add('active');
         } catch (e) {
-            alert("マイクの許可が必要です。");
+            alert("マイクの許可が必要です。GitHub Pages(https)で開いているか確認してください。");
         }
     }
 
     function stopRecording() {
-        mediaRecorder.stop();
+        const endBuf = mp3Encoder.flush();
+        if (endBuf.length > 0) mp3Data.push(endBuf);
+
+        const blob = new Blob(mp3Data, { type: 'audio/mp3' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Memo_${new Date().getTime()}.mp3`;
+        a.click();
+
+        // クリーンアップ
+        processor.disconnect();
+        source.disconnect();
         stream.getTracks().forEach(track => track.stop());
         clearInterval(timerInterval);
+        isRecording = false;
         
         btn.innerText = "🎤 録音開始";
         btn.classList.remove('recording');
@@ -110,7 +138,7 @@
     }
 
     btn.onclick = () => {
-        if (!mediaRecorder || mediaRecorder.state === "inactive") {
+        if (!isRecording) {
             startRecording();
         } else {
             stopRecording();
