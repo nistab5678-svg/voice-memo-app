@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>Voice Memo Pro - Sync</title>
+    <title>Voice Recorder - Pro</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body { 
@@ -20,25 +20,20 @@
         .header-dots { display: flex; gap: 7px; margin-bottom: 20px; }
         .dot { width: 12px; height: 12px; border-radius: 50%; }
         .red { background: #ff5f56; } .yellow { background: #ffbd2e; } .green { background: #27c93f; }
-        #status { font-size: 0.85rem; font-weight: 600; color: #888; margin-bottom: 15px; letter-spacing: 0.5px; }
+        
+        #status { font-size: 0.85rem; font-weight: 600; color: #888; margin-bottom: 25px; letter-spacing: 0.5px; }
         #status.active { color: #ff3b30; }
+
         .main-btn { 
-            font-size: 1rem; font-weight: 600; padding: 15px;
-            cursor: pointer; border: none; border-radius: 12px; width: 100%;
+            font-size: 1.1rem; font-weight: 600; padding: 20px;
+            cursor: pointer; border: none; border-radius: 15px; width: 100%;
             background: #007aff; color: white; transition: all 0.2s;
             box-shadow: 0 4px 12px rgba(0,122,255,0.3);
         }
         .main-btn.recording { background: #ff3b30; box-shadow: 0 4px 12px rgba(255,59,48,0.3); }
         .main-btn:active { transform: scale(0.97); }
-        .pip-btn { 
-            background: none; border: none; color: #007aff; font-size: 0.85rem; 
-            margin-bottom: 15px; cursor: pointer; font-weight: 500;
-        }
-        textarea { 
-            width: 93%; height: 100px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.05);
-            margin-top: 20px; padding: 12px; font-size: 0.9rem; 
-            background: rgba(255, 255, 255, 0.4); resize: none; color: #333;
-        }
+
+        .time-display { font-size: 2rem; font-weight: 200; color: #333; margin: 20px 0; }
     </style>
 </head>
 <body>
@@ -48,114 +43,78 @@
         <div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div>
     </div>
     
-    <button id="pipBtn" class="pip-btn">🔲 小窓モードで開く</button>
-    <div id="status">READY</div>
+    <div id="status">VOICE RECORDER</div>
+    <div id="timer" class="time-display">00:00</div>
 
-    <button id="startStopBtn" class="main-btn">🎤 記録開始 (録音＆文字起こし)</button>
-
-    <textarea id="resultArea" placeholder="ここに文字起こしが表示されます..."></textarea>
+    <button id="recordBtn" class="main-btn">🎤 録音開始</button>
 </div>
 
 <script>
     let stream = null;
     let mediaRecorder = null;
     let audioChunks = [];
-    let isWorking = false;
+    let startTime = null;
+    let timerInterval = null;
 
     const statusEl = document.getElementById('status');
-    const btn = document.getElementById('startStopBtn');
-    const resultArea = document.getElementById('resultArea');
+    const timerEl = document.getElementById('timer');
+    const btn = document.getElementById('recordBtn');
 
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const recognition = SpeechRecognition ? new SpeechRecognition() : null;
-
-    if (recognition) {
-        recognition.lang = 'ja-JP';
-        recognition.continuous = true;
-        recognition.interimResults = true;
-
-        recognition.onresult = (e) => {
-            let txt = "";
-            for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
-            resultArea.value = txt;
-        };
-
-        recognition.onerror = (e) => {
-            console.error("Recognition Error:", e.error);
-            if (e.error === 'network') resultArea.value = "⚠️ ネットワークエラー。ネット接続を確認してください。";
-        };
+    function updateTimer() {
+        const now = new Date();
+        const diff = new Date(now - startTime);
+        const m = String(diff.getMinutes()).padStart(2, '0');
+        const s = String(diff.getSeconds()).padStart(2, '0');
+        timerEl.innerText = `${m}:${s}`;
     }
 
-    async function stopAndSave() {
-        if (recognition) recognition.stop();
-        if (mediaRecorder) mediaRecorder.stop();
-        
-        if (stream) {
-            stream.getTracks().forEach(t => t.stop());
-            stream = null;
-        }
-
-        isWorking = false;
-        btn.innerText = "🎤 記録開始 (録音＆文字起こし)";
-        btn.classList.remove('recording');
-        statusEl.innerText = "SAVED";
-        statusEl.classList.remove('active');
-    }
-
-    btn.onclick = async () => {
-        if (isWorking) {
-            stopAndSave();
-            return;
-        }
-
+    async function startRecording() {
         try {
             stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             mediaRecorder = new MediaRecorder(stream);
             audioChunks = [];
+
             mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
             mediaRecorder.onstop = () => {
-                const now = new Date().getTime();
-                const audioBlob = new Blob(audioChunks, { type: 'audio/mp3' });
-                saveFile(audioBlob, `Memo_${now}.mp3`);
-                if (resultArea.value) {
-                    const textBlob = new Blob([resultArea.value], {type:'text/plain'});
-                    saveFile(textBlob, `Text_${now}.txt`);
-                }
+                const blob = new Blob(audioChunks, { type: 'audio/webm' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Recording_${new Date().getTime()}.webm`;
+                a.click();
             };
 
-            resultArea.value = "";
             mediaRecorder.start();
-            if (recognition) recognition.start();
+            startTime = new Date();
+            timerInterval = setInterval(updateTimer, 1000);
 
-            isWorking = true;
-            statusEl.innerText = "● RECORDING & TRANSCRIBING";
-            statusEl.classList.add('active');
-            btn.innerText = "■ 停止して一括保存";
+            btn.innerText = "■ 停止して保存";
             btn.classList.add('recording');
-
+            statusEl.innerText = "● RECORDING";
+            statusEl.classList.add('active');
         } catch (e) {
-            alert("マイクの許可が必要です。URLが http(s) で始まっているか確認してください。");
+            alert("マイクの許可が必要です。");
         }
-    };
-
-    function saveFile(blob, name) {
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = name;
-        a.click();
     }
 
-    document.getElementById('pipBtn').onclick = async () => {
-        if (!window.documentPictureInPicture) {
-            alert("このブラウザは小窓モードに対応していません。");
-            return;
+    function stopRecording() {
+        mediaRecorder.stop();
+        stream.getTracks().forEach(track => track.stop());
+        clearInterval(timerInterval);
+        
+        btn.innerText = "🎤 録音開始";
+        btn.classList.remove('recording');
+        statusEl.innerText = "SAVED";
+        statusEl.classList.remove('active');
+        timerEl.innerText = "00:00";
+    }
+
+    btn.onclick = () => {
+        if (!mediaRecorder || mediaRecorder.state === "inactive") {
+            startRecording();
+        } else {
+            stopRecording();
         }
-        const pipWindow = await window.documentPictureInPicture.requestWindow({ width: 340, height: 450 });
-        const style = document.createElement('style');
-        style.textContent = document.querySelector('style').textContent;
-        pipWindow.document.head.appendChild(style);
-        pipWindow.document.body.appendChild(document.querySelector('.container'));
-        pipWindow.onpagehide = () => { location.reload(); };
     };
 </script>
 </body>
